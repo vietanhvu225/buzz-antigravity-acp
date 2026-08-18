@@ -1,8 +1,8 @@
 {
   "name": "buzz-antigravity-acp",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Agent Client Protocol (ACP) adapter wrapping Google Antigravity CLI (agy) for Buzz and AI agent clients",
-  "main": "dist/index.js",
+  "main": "./dist/index.js",
   "bin": {
     "antigravity-acp": "./dist/index.js",
     "buzz-antigravity-acp": "./dist/index.js"

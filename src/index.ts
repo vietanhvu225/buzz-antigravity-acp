@@ -121,7 +121,11 @@ function getAvailableModels(): ModelInfo[] {
   const availableModels: ModelInfo[] = [];
 
   try {
-    const rawOutput = execSync(`"${agyExec}" models`, { env: process.env }).toString();
+    const rawOutput = execSync(`"${agyExec}" models`, {
+      env: process.env,
+      timeout: 10000,
+      encoding: "utf-8",
+    }).toString();
     const lines = rawOutput.split("\n");
     for (const line of lines) {
       const trimmed = line.trim();
@@ -137,16 +141,21 @@ function getAvailableModels(): ModelInfo[] {
         });
       }
     }
-  } catch (_e) {
-    // Ignore execSync errors and fall back below
+    logDebug(`FETCH MODELS >>> dynamically fetched ${availableModels.length} models from agy CLI`);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logDebug(`FETCH MODELS WARN >>> failed to query agy models (${msg}), using static fallback`);
   }
 
   if (availableModels.length > 0) {
     return availableModels;
   }
 
-  // Static fallback matching local agy CLI models
+  // Static fallback matching current Google Antigravity catalog
   return [
+    { modelId: "gemini-3.7-flash-high", name: "Gemini 3.7 Flash (High)", description: "Google Antigravity Gemini 3.7 Flash (High)" },
+    { modelId: "gemini-3.7-flash-medium", name: "Gemini 3.7 Flash (Medium)", description: "Google Antigravity Gemini 3.7 Flash (Medium)" },
+    { modelId: "gemini-3.7-flash-low", name: "Gemini 3.7 Flash (Low)", description: "Google Antigravity Gemini 3.7 Flash (Low)" },
     { modelId: "gemini-3.6-flash-high", name: "Gemini 3.6 Flash (High)", description: "Google Antigravity Gemini 3.6 Flash (High)" },
     { modelId: "gemini-3.6-flash-medium", name: "Gemini 3.6 Flash (Medium)", description: "Google Antigravity Gemini 3.6 Flash (Medium)" },
     { modelId: "gemini-3.6-flash-low", name: "Gemini 3.6 Flash (Low)", description: "Google Antigravity Gemini 3.6 Flash (Low)" },
@@ -157,7 +166,7 @@ function getAvailableModels(): ModelInfo[] {
     { modelId: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low)", description: "Google Antigravity Gemini 3.1 Pro (Low)" },
     { modelId: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking)", description: "Google Antigravity Claude Sonnet 4.6 (Thinking)" },
     { modelId: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)", description: "Google Antigravity Claude Opus 4.6 (Thinking)" },
-    { modelId: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)" , description: "Google Antigravity GPT-OSS 120B (Medium)" }
+    { modelId: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)", description: "Google Antigravity GPT-OSS 120B (Medium)" }
   ];
 }
 

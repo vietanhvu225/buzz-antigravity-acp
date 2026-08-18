@@ -260,8 +260,9 @@ function handleRequest(req) {
             break;
         case "session/new": {
             const sessionId = "session-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
-            sessions.set(sessionId, { sessionId });
             const models = getAvailableModels();
+            const defaultModel = models[0]?.modelId || "gemini-3.6-flash-high";
+            sessions.set(sessionId, { sessionId, selectedModel: defaultModel });
             sendResponse({
                 jsonrpc: "2.0",
                 id,
@@ -279,10 +280,30 @@ function handleRequest(req) {
                         }
                     ],
                     models: {
-                        currentModelId: models[0]?.modelId || "gemini-3.6-flash-high",
+                        currentModelId: defaultModel,
                         availableModels: models
                     }
                 },
+            });
+            break;
+        }
+        case "session/set_config_option": {
+            const sessionId = typeof params?.sessionId === "string" ? params.sessionId : undefined;
+            const configId = params?.configId;
+            const value = params?.value;
+            logDebug(`CONFIG OPTION >>> sessionId: ${sessionId}, configId: ${configId}, value: ${value}`);
+            if (sessionId) {
+                const session = sessions.get(sessionId) || { sessionId };
+                if (configId === "model" && typeof value === "string") {
+                    session.selectedModel = value;
+                    logDebug(`SET MODEL >>> session ${sessionId} model set to ${value}`);
+                }
+                sessions.set(sessionId, session);
+            }
+            sendResponse({
+                jsonrpc: "2.0",
+                id,
+                result: { status: "ok" },
             });
             break;
         }
@@ -339,7 +360,9 @@ function executeAntigravityPrompt(requestId, params) {
     sessions.set(sessionId, session);
     session.activeRequestId = requestId;
     const promptText = extractPromptText(params);
-    const selectedModel = typeof params?.model === "string" ? params.model : (typeof params?.modelId === "string" ? params.modelId : undefined);
+    const selectedModel = typeof params?.model === "string"
+        ? params.model
+        : (typeof params?.modelId === "string" ? params.modelId : session.selectedModel);
     // Resolve `agy` CLI binary (checks standard locations and PATH)
     const agyExec = resolveAgyExecutable();
     const agyArgs = ["--output-format", "stream-json", "--dangerously-skip-permissions"];
@@ -485,10 +508,22 @@ function extractPromptText(params) {
         return "";
     if (typeof params.prompt === "string")
         return params.prompt;
+    if (Array.isArray(params.prompt)) {
+        return params.prompt
+            .map((p) => (typeof p === "string" ? p : p?.text || ""))
+            .filter(Boolean)
+            .join("\n\n");
+    }
     if (Array.isArray(params.messages)) {
         const lastMsg = params.messages[params.messages.length - 1];
         if (typeof lastMsg?.content === "string")
             return lastMsg.content;
+        if (Array.isArray(lastMsg?.content)) {
+            return lastMsg.content
+                .map((c) => (typeof c === "string" ? c : c?.text || ""))
+                .filter(Boolean)
+                .join("\n\n");
+        }
     }
-    return JSON.stringify(params);
+    return "";
 }

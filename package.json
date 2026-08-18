@@ -1,0 +1,45 @@
+{
+  "name": "buzz-antigravity-acp",
+  "version": "0.1.1",
+  "description": "Agent Client Protocol (ACP) adapter wrapping Google Antigravity CLI (agy) for Buzz and AI agent clients",
+  "main": "dist/index.js",
+  "bin": {
+    "antigravity-acp": "./dist/index.js",
+    "buzz-antigravity-acp": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "start": "node dist/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vietanhvu225/buzz-antigravity-acp.git"
+  },
+  "homepage": "https://github.com/vietanhvu225/buzz-antigravity-acp#readme",
+  "bugs": {
+    "url": "https://github.com/vietanhvu225/buzz-antigravity-acp/issues"
+  },
+  "keywords": [
+    "acp",
+    "agent-client-protocol",
+    "antigravity",
+    "agy",
+    "buzz",
+    "ai-agent",
+    "nostr",
+    "gemini"
+  ],
+  "author": "Andy Vu Viet <vietanhvu225@gmail.com>",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}

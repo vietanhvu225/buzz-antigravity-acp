@@ -161,59 +161,56 @@ function getAvailableModels() {
     }
     catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        logDebug(`FETCH MODELS WARN >>> failed to query agy models (${msg}), using static fallback`);
+        logDebug(`FETCH MODELS ERR >>> failed to query agy models (${msg})`);
+        if (msg.includes("ENOENT")) {
+            throw new Error(`Google Antigravity CLI ('agy') is not installed or not found on PATH. ` +
+                `Please install Google Antigravity CLI, ensure 'agy' is on your PATH, and run 'agy auth login'.`);
+        }
+        throw new Error(`Failed to fetch Google Antigravity models: ${msg}. Please ensure 'agy' is authenticated via 'agy auth login'.`);
     }
-    if (availableModels.length > 0) {
-        return availableModels;
+    if (availableModels.length === 0) {
+        throw new Error("No models returned by Google Antigravity CLI ('agy models'). Please run 'agy auth login' to authenticate.");
     }
-    // Static fallback matching current Google Antigravity catalog
-    return [
-        { modelId: "gemini-3.7-flash-high", name: "Gemini 3.7 Flash (High)", description: "Google Antigravity Gemini 3.7 Flash (High)" },
-        { modelId: "gemini-3.7-flash-medium", name: "Gemini 3.7 Flash (Medium)", description: "Google Antigravity Gemini 3.7 Flash (Medium)" },
-        { modelId: "gemini-3.7-flash-low", name: "Gemini 3.7 Flash (Low)", description: "Google Antigravity Gemini 3.7 Flash (Low)" },
-        { modelId: "gemini-3.6-flash-high", name: "Gemini 3.6 Flash (High)", description: "Google Antigravity Gemini 3.6 Flash (High)" },
-        { modelId: "gemini-3.6-flash-medium", name: "Gemini 3.6 Flash (Medium)", description: "Google Antigravity Gemini 3.6 Flash (Medium)" },
-        { modelId: "gemini-3.6-flash-low", name: "Gemini 3.6 Flash (Low)", description: "Google Antigravity Gemini 3.6 Flash (Low)" },
-        { modelId: "gemini-3.5-flash-high", name: "Gemini 3.5 Flash (High)", description: "Google Antigravity Gemini 3.5 Flash (High)" },
-        { modelId: "gemini-3.5-flash-medium", name: "Gemini 3.5 Flash (Medium)", description: "Google Antigravity Gemini 3.5 Flash (Medium)" },
-        { modelId: "gemini-3.5-flash-low", name: "Gemini 3.5 Flash (Low)", description: "Google Antigravity Gemini 3.5 Flash (Low)" },
-        { modelId: "gemini-3.1-pro-high", name: "Gemini 3.1 Pro (High)", description: "Google Antigravity Gemini 3.1 Pro (High)" },
-        { modelId: "gemini-3.1-pro-low", name: "Gemini 3.1 Pro (Low)", description: "Google Antigravity Gemini 3.1 Pro (Low)" },
-        { modelId: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking)", description: "Google Antigravity Claude Sonnet 4.6 (Thinking)" },
-        { modelId: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)", description: "Google Antigravity Claude Opus 4.6 (Thinking)" },
-        { modelId: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)", description: "Google Antigravity GPT-OSS 120B (Medium)" }
-    ];
+    return availableModels;
 }
 // CLI command model discovery query handler for Buzz
 if (process.argv.includes("models") || process.argv.includes("--models")) {
     logDebug("CLI QUERY >>> models command requested");
-    const models = getAvailableModels();
-    const modelResponse = {
-        agent: {
-            name: "Antigravity",
-            version: "0.1.0"
-        },
-        stable: {
-            configOptions: [
-                {
-                    configId: "model",
-                    category: "model",
-                    displayName: "Model",
-                    options: models.map(m => ({
-                        value: m.modelId,
-                        displayName: m.name
-                    }))
-                }
-            ]
-        },
-        unstable: {
-            currentModelId: models[0]?.modelId || "gemini-3.6-flash-high",
-            availableModels: models
-        }
-    };
-    logDebug(`CLI QUERY OUT >>> ${JSON.stringify(modelResponse)}`);
-    console.log(JSON.stringify(modelResponse));
-    process.exit(0);
+    try {
+        const models = getAvailableModels();
+        const modelResponse = {
+            agent: {
+                name: "Antigravity",
+                version: "0.1.0"
+            },
+            stable: {
+                configOptions: [
+                    {
+                        configId: "model",
+                        category: "model",
+                        displayName: "Model",
+                        options: models.map(m => ({
+                            value: m.modelId,
+                            displayName: m.name
+                        }))
+                    }
+                ]
+            },
+            unstable: {
+                currentModelId: models[0]?.modelId || "gemini-3.7-flash-high",
+                availableModels: models
+            }
+        };
+        logDebug(`CLI QUERY OUT >>> ${JSON.stringify(modelResponse)}`);
+        console.log(JSON.stringify(modelResponse));
+        process.exit(0);
+    }
+    catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logDebug(`CLI QUERY ERR >>> ${msg}`);
+        process.stderr.write(`Error: ${msg}\n`);
+        process.exit(1);
+    }
 }
 const sessions = new Map();
 const rl = readline.createInterface({
@@ -269,8 +266,24 @@ function handleRequest(req) {
             break;
         case "session/new": {
             const sessionId = "session-" + Date.now() + "-" + Math.random().toString(36).substring(2, 7);
-            const models = getAvailableModels();
-            const defaultModel = models[0]?.modelId || "gemini-3.6-flash-high";
+            let models = [];
+            try {
+                models = getAvailableModels();
+            }
+            catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                logDebug(`SESSION NEW ERR >>> ${msg}`);
+                sendResponse({
+                    jsonrpc: "2.0",
+                    id,
+                    error: {
+                        code: -32000,
+                        message: msg,
+                    },
+                });
+                break;
+            }
+            const defaultModel = models[0]?.modelId || "gemini-3.7-flash-high";
             sessions.set(sessionId, { sessionId, selectedModel: defaultModel });
             sendResponse({
                 jsonrpc: "2.0",

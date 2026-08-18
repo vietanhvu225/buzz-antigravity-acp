@@ -39,12 +39,89 @@ interface ModelInfo {
   description: string;
 }
 
+function resolveAgyExecutable(): string {
+  // 1. Try finding via system where.exe (Windows) or which (Unix)
+  try {
+    const lookupCmd = process.platform === "win32" ? "where.exe agy" : "which agy";
+    const foundPath = execSync(lookupCmd, { env: process.env, stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .split(/\r?\n/)[0]
+      ?.trim();
+    if (foundPath && fs.existsSync(foundPath)) {
+      logDebug(`RESOLVED agy via CLI lookup >>> ${foundPath}`);
+      const dir = path.dirname(foundPath);
+      if (process.env.PATH && !process.env.PATH.includes(dir)) {
+        process.env.PATH = `${dir}${path.delimiter}${process.env.PATH}`;
+      }
+      return foundPath;
+    }
+  } catch (_e) {
+    // Continue to candidate list below
+  }
+
+  // 2. Scan standard install locations
+  const candidates: string[] = [];
+
+  if (process.platform === "win32") {
+    const localAppData = process.env.LOCALAPPDATA;
+    if (localAppData) {
+      candidates.push(path.join(localAppData, "agy", "bin", "agy.exe"));
+      candidates.push(path.join(localAppData, "Programs", "agy", "bin", "agy.exe"));
+      candidates.push(path.join(localAppData, "Google", "Antigravity", "bin", "agy.exe"));
+    }
+
+    const appData = process.env.APPDATA;
+    if (appData) {
+      candidates.push(path.join(appData, "npm", "agy.cmd"));
+      candidates.push(path.join(appData, "npm", "agy.exe"));
+    }
+
+    const userProfile = process.env.USERPROFILE;
+    if (userProfile) {
+      candidates.push(path.join(userProfile, "AppData", "Local", "agy", "bin", "agy.exe"));
+      candidates.push(path.join(userProfile, ".local", "bin", "agy.exe"));
+      candidates.push(path.join(userProfile, ".local", "bin", "agy"));
+      candidates.push(path.join(userProfile, "agy", "bin", "agy.exe"));
+      candidates.push(path.join(userProfile, ".cargo", "bin", "agy.exe"));
+    }
+
+    candidates.push("agy.exe", "agy.cmd", "agy.bat", "agy");
+  } else {
+    const home = process.env.HOME;
+    if (home) {
+      candidates.push(path.join(home, ".local", "bin", "agy"));
+      candidates.push(path.join(home, ".cargo", "bin", "agy"));
+      candidates.push(path.join(home, ".agy", "bin", "agy"));
+    }
+    candidates.push("/usr/local/bin/agy", "/opt/homebrew/bin/agy", "/usr/bin/agy", "agy");
+  }
+
+  for (const candidate of candidates) {
+    if (path.isAbsolute(candidate)) {
+      try {
+        if (fs.existsSync(candidate)) {
+          logDebug(`RESOLVED agy via candidate list >>> ${candidate}`);
+          const dir = path.dirname(candidate);
+          if (process.env.PATH && !process.env.PATH.includes(dir)) {
+            process.env.PATH = `${dir}${path.delimiter}${process.env.PATH}`;
+          }
+          return candidate;
+        }
+      } catch (_e) {
+        // Ignore filesystem check errors
+      }
+    }
+  }
+
+  return process.platform === "win32" ? "agy.exe" : "agy";
+}
+
 function getAvailableModels(): ModelInfo[] {
-  const agyExec = process.platform === "win32" ? "agy.exe" : "agy";
+  const agyExec = resolveAgyExecutable();
   const availableModels: ModelInfo[] = [];
 
   try {
-    const rawOutput = execSync(`${agyExec} models`, { env: process.env }).toString();
+    const rawOutput = execSync(`"${agyExec}" models`, { env: process.env }).toString();
     const lines = rawOutput.split("\n");
     for (const line of lines) {
       const trimmed = line.trim();
@@ -290,8 +367,8 @@ function executeAntigravityPrompt(requestId: number | string | undefined, params
   const promptText = extractPromptText(params);
   const selectedModel = typeof params?.model === "string" ? params.model : (typeof params?.modelId === "string" ? params.modelId : undefined);
 
-  // Spawn `agy` CLI subprocess reading prompt directly from STDIN (no -p flag needed for agy)
-  const agyExec = process.platform === "win32" ? "agy.exe" : "agy";
+  // Resolve `agy` CLI binary (checks standard locations and PATH)
+  const agyExec = resolveAgyExecutable();
   const agyArgs = ["--output-format", "stream-json", "--dangerously-skip-permissions"];
   if (selectedModel) {
     agyArgs.push("--model", selectedModel);
@@ -299,9 +376,11 @@ function executeAntigravityPrompt(requestId: number | string | undefined, params
 
   logDebug(`SPAWN >>> ${agyExec} ${agyArgs.join(" ")} (prompt length: ${promptText.length} chars)`);
 
+  const isCmdOrBat = agyExec.toLowerCase().endsWith(".cmd") || agyExec.toLowerCase().endsWith(".bat");
   const child = spawn(agyExec, agyArgs, {
     env: process.env,
     stdio: ["pipe", "pipe", "pipe"],
+    shell: isCmdOrBat,
   });
 
   session.activeChild = child;
@@ -321,12 +400,19 @@ function executeAntigravityPrompt(requestId: number | string | undefined, params
     finished = true;
     session.activeChild = undefined;
     logDebug(`SUBPROC ERR >>> ${err.message}`);
+
+    let userFriendlyMessage = `Failed to spawn agy executable (${agyExec}): ${err.message}`;
+    if (err.message.includes("ENOENT")) {
+      userFriendlyMessage = `Google Antigravity CLI ('agy') was not found on this machine (${err.message}). ` +
+        `Please install Google Antigravity CLI and ensure 'agy' is on your PATH, then run 'agy auth login'.`;
+    }
+
     sendResponse({
       jsonrpc: "2.0",
       id: requestId,
       error: {
         code: -32000,
-        message: `Failed to spawn agy executable (${agyExec}): ${err.message}`,
+        message: userFriendlyMessage,
       },
     });
   });

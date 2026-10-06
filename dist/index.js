@@ -402,7 +402,38 @@ function executeAntigravityPrompt(requestId, params) {
     let stderrData = "";
     let finished = false;
     let lineBuffer = "";
-    let fullAgentText = "";
+    let pendingResponseText = "";
+    let hasCalledTools = false;
+    let sentFinalMessage = false;
+    const sendThoughtChunk = (text) => {
+        if (!text)
+            return;
+        sendNotification("session/update", {
+            sessionId,
+            update: {
+                sessionUpdate: "agent_thought_chunk",
+                content: {
+                    type: "text",
+                    text,
+                },
+            },
+        });
+    };
+    const sendMessageChunk = (text) => {
+        if (!text)
+            return;
+        sentFinalMessage = true;
+        sendNotification("session/update", {
+            sessionId,
+            update: {
+                sessionUpdate: "agent_message_chunk",
+                content: {
+                    type: "text",
+                    text,
+                },
+            },
+        });
+    };
     // Write promptText directly into child STDIN stream
     if (child.stdin) {
         child.stdin.write(promptText);
@@ -436,49 +467,36 @@ function executeAntigravityPrompt(requestId, params) {
             const json = JSON.parse(trimmed);
             if (json.event === "step_update" && json.step_update) {
                 const step = json.step_update;
-                if (step.step_type === "agent_response" && typeof step.text_delta === "string" && step.text_delta) {
-                    fullAgentText += step.text_delta;
-                    sendNotification("session/update", {
-                        sessionId,
-                        update: {
-                            sessionUpdate: "agent_message_chunk",
-                            content: {
-                                type: "text",
-                                text: step.text_delta,
-                            },
-                        },
-                    });
+                if (step.step_type === "tool") {
+                    hasCalledTools = true;
+                    // Intermediate planning/reasoning accumulated before a tool call should be routed to thoughts
+                    if (pendingResponseText) {
+                        sendThoughtChunk(pendingResponseText);
+                        pendingResponseText = "";
+                    }
+                    if (step.state === "ACTIVE") {
+                        sendThoughtChunk(`> ⚙️ ${step.tool_name || "tool"}...\n`);
+                    }
+                }
+                else if (step.step_type === "agent_response" && typeof step.text_delta === "string" && step.text_delta) {
+                    pendingResponseText += step.text_delta;
                 }
             }
-            else if (json.event === "result" && json.result?.response) {
-                if (!fullAgentText) {
-                    fullAgentText = json.result.response;
-                    sendNotification("session/update", {
-                        sessionId,
-                        update: {
-                            sessionUpdate: "agent_message_chunk",
-                            content: {
-                                type: "text",
-                                text: json.result.response,
-                            },
-                        },
-                    });
+            else if (json.event === "result") {
+                const finalResp = json.result?.response;
+                if (typeof finalResp === "string" && finalResp) {
+                    sendMessageChunk(finalResp);
+                    pendingResponseText = "";
+                }
+                else if (pendingResponseText && json.result?.status === "SUCCESS") {
+                    sendMessageChunk(pendingResponseText);
+                    pendingResponseText = "";
                 }
             }
         }
         catch (_e) {
-            // Non-JSON output fallback
-            fullAgentText += trimmed + "\n";
-            sendNotification("session/update", {
-                sessionId,
-                update: {
-                    sessionUpdate: "agent_message_chunk",
-                    content: {
-                        type: "text",
-                        text: trimmed + "\n",
-                    },
-                },
-            });
+            // Non-JSON output (CLI warnings, deprecation notices, banners): log to debug, do not spam user channel
+            logDebug(`AGY NON-JSON >>> ${trimmed}`);
         }
     };
     child.stdout?.on("data", (chunk) => {
@@ -503,6 +521,10 @@ function executeAntigravityPrompt(requestId, params) {
         if (lineBuffer.trim()) {
             processLine(lineBuffer);
             lineBuffer = "";
+        }
+        if (code === 0 && !sentFinalMessage && pendingResponseText) {
+            sendMessageChunk(pendingResponseText);
+            pendingResponseText = "";
         }
         if (code === 0) {
             sendResponse({
